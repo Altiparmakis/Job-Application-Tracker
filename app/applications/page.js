@@ -13,9 +13,26 @@ const statuses = [
   { label: "Accepted", value: "ACCEPTED" },
 ];
 
+const noteSelect = {
+  id: true,
+  applicationId: true,
+  content: true,
+  createdAt: true,
+  updatedAt: true,
+};
+
+function serializeNote(note) {
+  return {
+    ...note,
+    createdAt: note.createdAt.toISOString(),
+    updatedAt: note.updatedAt.toISOString(),
+  };
+}
+
 function serializeApplication(application) {
   return {
     ...application,
+    notes: application.notes.map(serializeNote),
     createdAt: application.createdAt.toISOString(),
     updatedAt: application.updatedAt.toISOString(),
   };
@@ -43,6 +60,15 @@ export default async function ApplicationsPage() {
       status: true,
       createdAt: true,
       updatedAt: true,
+      notes: {
+        where: {
+          clerkId: userId,
+        },
+        orderBy: {
+          createdAt: "desc",
+        },
+        select: noteSelect,
+      },
     },
     orderBy: {
       createdAt: "desc",

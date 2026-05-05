@@ -3,7 +3,13 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { celebrateAcceptedApplication } from "@/lib/confetti";
-import { deleteJobApplication, updateJobApplication } from "./actions";
+import {
+  createApplicationNote,
+  deleteApplicationNote,
+  deleteJobApplication,
+  updateApplicationNote,
+  updateJobApplication,
+} from "./actions";
 import AddApplicationModal from "./AddApplicationModal";
 import ApplicationsBoard from "./ApplicationsBoard";
 
@@ -88,12 +94,193 @@ function getEditFormValues(application) {
   };
 }
 
+function getNoteEditValues(notes) {
+  return (notes ?? []).reduce((values, note) => {
+    values[note.id] = note.content ?? "";
+
+    return values;
+  }, {});
+}
+
 function EditField({ label, required, children }) {
   return (
     <label className="block rounded-lg border border-slate-200 bg-slate-50/70 p-4 text-sm font-medium text-slate-700">
       {label} {required ? <span className="text-teal-700">*</span> : null}
       {children}
     </label>
+  );
+}
+
+function ApplicationNotesPanel({
+  notes,
+  noteContent,
+  isEditing,
+  isSaving,
+  noteEditValues = {},
+  noteErrors = {},
+  deletingNoteId,
+  savingNoteId,
+  errorMessage,
+  deleteErrorMessage,
+  onContentChange,
+  onNoteDelete,
+  onNoteEditCancel,
+  onNoteEditChange,
+  onNoteEditSave,
+  onSave,
+}) {
+  const safeNotes = Array.isArray(notes) ? notes : [];
+  const isNoteActionPending =
+    isSaving || Boolean(savingNoteId) || Boolean(deletingNoteId);
+
+  return (
+    <aside className="border-t border-slate-200 bg-slate-50/60 px-6 py-6 lg:border-l lg:border-t-0">
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="text-lg font-semibold text-slate-950">Notes</h3>
+        <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-slate-500 ring-1 ring-slate-200">
+          {safeNotes.length}
+        </span>
+      </div>
+
+      <div className="mt-5 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+        <label
+          htmlFor="application-note-content"
+          className="text-xs font-semibold text-slate-500"
+        >
+          New note
+        </label>
+        <textarea
+          id="application-note-content"
+          value={noteContent}
+          onChange={(event) => onContentChange(event.target.value)}
+          disabled={isNoteActionPending}
+          rows={5}
+          placeholder="Add a quick update..."
+          className="mt-2 w-full resize-y rounded-md border border-slate-300 bg-white px-3 py-2 text-sm leading-6 text-slate-950 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-teal-600 focus:ring-2 focus:ring-teal-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
+        />
+
+        {errorMessage ? (
+          <p className="mt-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            {errorMessage}
+          </p>
+        ) : null}
+
+        <div className="mt-3 flex justify-end">
+          <button
+            type="button"
+            onClick={onSave}
+            disabled={isNoteActionPending || !noteContent.trim()}
+            className="rounded-md bg-teal-700 px-3.5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-teal-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-700 disabled:cursor-not-allowed disabled:bg-teal-900/50"
+          >
+            {isSaving ? "Saving..." : "Add Note"}
+          </button>
+        </div>
+      </div>
+
+      {deleteErrorMessage ? (
+        <p className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          {deleteErrorMessage}
+        </p>
+      ) : null}
+
+      <div className="mt-5 space-y-3">
+        {safeNotes.length > 0 ? (
+          safeNotes.map((note) => {
+            const editValue = noteEditValues[note.id] ?? note.content ?? "";
+            const hasChanged = editValue.trim() !== (note.content ?? "").trim();
+            const isNoteSaving = savingNoteId === note.id;
+            const isNoteDeleting = deletingNoteId === note.id;
+            const isOtherNoteActionPending =
+              isSaving ||
+              (Boolean(savingNoteId) && !isNoteSaving) ||
+              (Boolean(deletingNoteId) && !isNoteDeleting);
+
+            return (
+              <article
+                key={note.id}
+                className="relative rounded-lg border border-slate-200 bg-white p-4 pr-11 shadow-sm"
+              >
+                <button
+                  type="button"
+                  onClick={(event) => onNoteDelete(event, note.id)}
+                  disabled={
+                    isSaving ||
+                    Boolean(savingNoteId) ||
+                    Boolean(deletingNoteId)
+                  }
+                  aria-label="Delete note"
+                  className="absolute right-2 top-2 rounded-md px-2 py-1 text-sm font-semibold leading-none text-slate-400 transition hover:bg-red-50 hover:text-red-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  X
+                </button>
+
+                {isEditing ? (
+                  <>
+                    <textarea
+                      value={editValue}
+                      onChange={(event) =>
+                        onNoteEditChange(note.id, event.target.value)
+                      }
+                      disabled={isNoteSaving || isOtherNoteActionPending}
+                      rows={4}
+                      className="w-full resize-y rounded-md border border-slate-300 bg-white px-3 py-2 text-sm leading-6 text-slate-950 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-teal-600 focus:ring-2 focus:ring-teal-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
+                    />
+
+                    {noteErrors[note.id] ? (
+                      <p className="mt-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                        {noteErrors[note.id]}
+                      </p>
+                    ) : null}
+
+                    <div className="mt-3 flex flex-wrap justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => onNoteEditCancel(note.id)}
+                        disabled={
+                          isNoteSaving ||
+                          isOtherNoteActionPending ||
+                          !hasChanged
+                        }
+                        className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 hover:text-slate-950 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-700 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onNoteEditSave(note)}
+                        disabled={
+                          isNoteSaving ||
+                          isOtherNoteActionPending ||
+                          !hasChanged ||
+                          !editValue.trim()
+                        }
+                        className="rounded-md bg-teal-700 px-3 py-1.5 text-sm font-semibold text-white shadow-sm transition hover:bg-teal-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-700 disabled:cursor-not-allowed disabled:bg-teal-900/50"
+                      >
+                        {isNoteSaving ? "Saving..." : "Save"}
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <p className="whitespace-pre-wrap text-sm leading-6 text-slate-700">
+                    {note.content}
+                  </p>
+                )}
+
+                <time className="mt-3 block text-xs font-medium text-slate-500">
+                  {formatDate(note.createdAt)}
+                </time>
+              </article>
+            );
+          })
+        ) : (
+          <div className="rounded-lg border border-dashed border-slate-300 bg-white px-4 py-8 text-center">
+            <p className="text-sm text-slate-500">
+              No notes yet. Add your first note.
+            </p>
+          </div>
+        )}
+      </div>
+    </aside>
   );
 }
 
@@ -171,6 +358,9 @@ function ApplicationDetailsModal({
   statuses,
   onClose,
   onDelete,
+  onNoteCreate,
+  onNoteDelete,
+  onNoteUpdate,
   onUpdate,
 }) {
   const [isDeleting, setIsDeleting] = useState(false);
@@ -179,13 +369,25 @@ function ApplicationDetailsModal({
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
   const [deleteError, setDeleteError] = useState("");
   const [saveError, setSaveError] = useState("");
+  const [noteContent, setNoteContent] = useState("");
+  const [isNoteSaving, setIsNoteSaving] = useState(false);
+  const [noteError, setNoteError] = useState("");
+  const [noteDeleteError, setNoteDeleteError] = useState("");
+  const [deletingNoteId, setDeletingNoteId] = useState("");
+  const [savingNoteId, setSavingNoteId] = useState("");
+  const [noteEditErrors, setNoteEditErrors] = useState({});
+  const [noteEditValues, setNoteEditValues] = useState(() =>
+    getNoteEditValues(application.notes),
+  );
   const [formValues, setFormValues] = useState(() =>
     getEditFormValues(application),
   );
+  const isAnyNoteSaving =
+    isNoteSaving || Boolean(savingNoteId) || Boolean(deletingNoteId);
 
   useEffect(() => {
     function handleKeyDown(event) {
-      if (event.key === "Escape" && !isDeleting && !isSaving) {
+      if (event.key === "Escape" && !isDeleting && !isSaving && !isAnyNoteSaving) {
         if (isDeleteConfirmOpen) {
           setIsDeleteConfirmOpen(false);
           return;
@@ -200,23 +402,29 @@ function ApplicationDetailsModal({
     return () => {
       document.removeEventListener("keydown", handleKeyDown);
     };
-  }, [isDeleteConfirmOpen, isDeleting, isSaving, onClose]);
+  }, [isAnyNoteSaving, isDeleteConfirmOpen, isDeleting, isSaving, onClose]);
 
   function handleClose() {
-    if (!isDeleting && !isSaving && !isDeleteConfirmOpen) {
+    if (!isDeleting && !isSaving && !isAnyNoteSaving && !isDeleteConfirmOpen) {
       onClose();
     }
   }
 
   function handleEditClick() {
     setFormValues(getEditFormValues(application));
+    setNoteEditValues(getNoteEditValues(application.notes));
+    setNoteEditErrors({});
+    setNoteDeleteError("");
     setSaveError("");
     setIsEditing(true);
   }
 
   function handleCancelEdit() {
-    if (!isSaving) {
+    if (!isSaving && !isAnyNoteSaving) {
       setFormValues(getEditFormValues(application));
+      setNoteEditValues(getNoteEditValues(application.notes));
+      setNoteEditErrors({});
+      setNoteDeleteError("");
       setSaveError("");
       setIsEditing(false);
     }
@@ -234,7 +442,7 @@ function ApplicationDetailsModal({
   async function handleSave(event) {
     event.preventDefault();
 
-    if (isSaving) {
+    if (isSaving || isAnyNoteSaving) {
       return;
     }
 
@@ -272,7 +480,7 @@ function ApplicationDetailsModal({
     setSaveError("");
 
     if (shouldCelebrateAccepted) {
-      celebrateAcceptedApplication();
+      await celebrateAcceptedApplication();
     }
 
     try {
@@ -293,7 +501,7 @@ function ApplicationDetailsModal({
   }
 
   async function handleDelete() {
-    if (isDeleting || isSaving) {
+    if (isDeleting || isSaving || isAnyNoteSaving) {
       return;
     }
 
@@ -310,7 +518,7 @@ function ApplicationDetailsModal({
   }
 
   async function handleConfirmDelete() {
-    if (isDeleting || isSaving) {
+    if (isDeleting || isSaving || isAnyNoteSaving) {
       return;
     }
 
@@ -327,6 +535,174 @@ function ApplicationDetailsModal({
     } catch {
       setIsDeleting(false);
       setDeleteError("Application could not be deleted.");
+    }
+  }
+
+  async function handleNoteSave() {
+    if (isAnyNoteSaving || isDeleting) {
+      return;
+    }
+
+    const nextContent = noteContent.trim();
+
+    if (!nextContent) {
+      setNoteError("Please write a note before saving.");
+      return;
+    }
+
+    setIsNoteSaving(true);
+    setNoteError("");
+    setNoteDeleteError("");
+
+    try {
+      const result = await onNoteCreate(application.id, nextContent);
+
+      if (result.success) {
+        setNoteContent("");
+        return;
+      }
+
+      setNoteError(result.message);
+    } catch {
+      setNoteError("Note could not be saved.");
+    } finally {
+      setIsNoteSaving(false);
+    }
+  }
+
+  function handleNoteEditChange(noteId, content) {
+    setNoteEditValues((currentValues) => ({
+      ...currentValues,
+      [noteId]: content,
+    }));
+    setNoteEditErrors((currentErrors) => {
+      if (!currentErrors[noteId]) {
+        return currentErrors;
+      }
+
+      const nextErrors = { ...currentErrors };
+      delete nextErrors[noteId];
+
+      return nextErrors;
+    });
+  }
+
+  function handleNoteEditCancel(noteId) {
+    const note = application.notes?.find((item) => item.id === noteId);
+
+    if (!note || savingNoteId === noteId) {
+      return;
+    }
+
+    setNoteEditValues((currentValues) => ({
+      ...currentValues,
+      [noteId]: note.content ?? "",
+    }));
+    setNoteEditErrors((currentErrors) => {
+      if (!currentErrors[noteId]) {
+        return currentErrors;
+      }
+
+      const nextErrors = { ...currentErrors };
+      delete nextErrors[noteId];
+
+      return nextErrors;
+    });
+  }
+
+  async function handleNoteEditSave(note) {
+    if (savingNoteId || isNoteSaving || isDeleting) {
+      return;
+    }
+
+    const nextContent = (noteEditValues[note.id] ?? "").trim();
+
+    if (!nextContent) {
+      setNoteEditErrors((currentErrors) => ({
+        ...currentErrors,
+        [note.id]: "Notes cannot be empty.",
+      }));
+      return;
+    }
+
+    setSavingNoteId(note.id);
+    setNoteDeleteError("");
+    setNoteEditErrors((currentErrors) => {
+      if (!currentErrors[note.id]) {
+        return currentErrors;
+      }
+
+      const nextErrors = { ...currentErrors };
+      delete nextErrors[note.id];
+
+      return nextErrors;
+    });
+
+    try {
+      const result = await onNoteUpdate(note.id, nextContent);
+
+      if (result.success) {
+        setNoteEditValues((currentValues) => ({
+          ...currentValues,
+          [note.id]: result.note.content,
+        }));
+        return;
+      }
+
+      setNoteEditErrors((currentErrors) => ({
+        ...currentErrors,
+        [note.id]: result.message,
+      }));
+    } catch {
+      setNoteEditErrors((currentErrors) => ({
+        ...currentErrors,
+        [note.id]: "Note could not be saved.",
+      }));
+    } finally {
+      setSavingNoteId("");
+    }
+  }
+
+  async function handleNoteDelete(event, noteId) {
+    event.stopPropagation();
+
+    if (deletingNoteId || isDeleting || isSaving || isNoteSaving || savingNoteId) {
+      return;
+    }
+
+    setDeletingNoteId(noteId);
+    setNoteDeleteError("");
+    setNoteEditValues((currentValues) => {
+      if (!(noteId in currentValues)) {
+        return currentValues;
+      }
+
+      const nextValues = { ...currentValues };
+      delete nextValues[noteId];
+
+      return nextValues;
+    });
+    setNoteEditErrors((currentErrors) => {
+      if (!currentErrors[noteId]) {
+        return currentErrors;
+      }
+
+      const nextErrors = { ...currentErrors };
+      delete nextErrors[noteId];
+
+      return nextErrors;
+    });
+
+    try {
+      const result = await onNoteDelete(application.id, noteId);
+
+      if (!result.success) {
+        setNoteDeleteError(result.message);
+      }
+    } catch {
+      setNoteDeleteError("Note could not be deleted.");
+    } finally {
+      setDeletingNoteId("");
     }
   }
 
@@ -355,7 +731,7 @@ function ApplicationDetailsModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="application-details-title"
-        className="max-h-[calc(100vh-3rem)] w-full max-w-3xl overflow-y-auto rounded-xl bg-white shadow-2xl"
+        className="max-h-[calc(100vh-3rem)] w-full max-w-6xl overflow-y-auto rounded-xl bg-white shadow-2xl"
         onClick={(event) => event.stopPropagation()}
       >
         <form onSubmit={handleSave}>
@@ -415,7 +791,7 @@ function ApplicationDetailsModal({
               <button
                 type="button"
                 onClick={handleDelete}
-                disabled={isDeleting || isSaving}
+                disabled={isDeleting || isSaving || isAnyNoteSaving}
                 className="inline-flex items-center justify-center rounded-md border border-red-200 bg-white px-3 py-2 text-sm font-semibold text-red-700 shadow-sm transition hover:border-red-300 hover:bg-red-50 hover:text-red-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {isDeleting ? "Deleting..." : "Delete Application"}
@@ -424,7 +800,7 @@ function ApplicationDetailsModal({
               <button
                 type="button"
                 onClick={handleClose}
-                disabled={isDeleting || isSaving}
+                disabled={isDeleting || isSaving || isAnyNoteSaving}
                 className="rounded-md p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-950 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-700 disabled:cursor-not-allowed disabled:opacity-60"
                 aria-label="Close application details"
               >
@@ -433,173 +809,198 @@ function ApplicationDetailsModal({
             </div>
           </div>
 
-          {isEditing ? (
-            <div className="space-y-5 px-6 py-6">
-              <div className="grid gap-3 sm:grid-cols-2">
-                <EditField label="Company name" required>
-                  <input
-                    name="companyName"
-                    type="text"
-                    required
-                    value={formValues.companyName}
-                    onChange={handleFieldChange}
-                    disabled={isSaving}
-                    className={inputClassName}
-                  />
-                </EditField>
+          <div className="grid lg:grid-cols-[minmax(0,1fr)_24rem]">
+            <div className="min-w-0">
+              {isEditing ? (
+                <div className="space-y-5 px-6 py-6">
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <EditField label="Company name" required>
+                      <input
+                        name="companyName"
+                        type="text"
+                        required
+                        value={formValues.companyName}
+                        onChange={handleFieldChange}
+                        disabled={isSaving}
+                        className={inputClassName}
+                      />
+                    </EditField>
 
-                <EditField label="Location">
-                  <input
-                    name="location"
-                    type="text"
-                    value={formValues.location}
-                    onChange={handleFieldChange}
-                    disabled={isSaving}
-                    className={inputClassName}
-                  />
-                </EditField>
+                    <EditField label="Location">
+                      <input
+                        name="location"
+                        type="text"
+                        value={formValues.location}
+                        onChange={handleFieldChange}
+                        disabled={isSaving}
+                        className={inputClassName}
+                      />
+                    </EditField>
 
-                <EditField label="Job type" required>
-                  <select
-                    name="jobType"
-                    required
-                    value={formValues.jobType}
-                    onChange={handleFieldChange}
-                    disabled={isSaving}
-                    className={inputClassName}
-                  >
-                    {jobTypeOptions.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </EditField>
+                    <EditField label="Job type" required>
+                      <select
+                        name="jobType"
+                        required
+                        value={formValues.jobType}
+                        onChange={handleFieldChange}
+                        disabled={isSaving}
+                        className={inputClassName}
+                      >
+                        {jobTypeOptions.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </EditField>
 
-                <EditField label="Status" required>
-                  <select
-                    name="status"
-                    required
-                    value={formValues.status}
-                    onChange={handleFieldChange}
-                    disabled={isSaving}
-                    className={inputClassName}
-                  >
-                    {statuses.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </EditField>
+                    <EditField label="Status" required>
+                      <select
+                        name="status"
+                        required
+                        value={formValues.status}
+                        onChange={handleFieldChange}
+                        disabled={isSaving}
+                        className={inputClassName}
+                      >
+                        {statuses.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </EditField>
 
-                <DetailItem label="Created date">{createdDate}</DetailItem>
+                    <DetailItem label="Created date">{createdDate}</DetailItem>
 
-                <DetailItem label="Updated date">{updatedDate}</DetailItem>
-              </div>
+                    <DetailItem label="Updated date">{updatedDate}</DetailItem>
+                  </div>
 
-              <EditField label="Description">
-                <textarea
-                  name="description"
-                  rows={5}
-                  value={formValues.description}
-                  onChange={handleFieldChange}
-                  disabled={isSaving}
-                  className={inputClassName}
-                />
-              </EditField>
+                  <EditField label="Description">
+                    <textarea
+                      name="description"
+                      rows={5}
+                      value={formValues.description}
+                      onChange={handleFieldChange}
+                      disabled={isSaving}
+                      className={inputClassName}
+                    />
+                  </EditField>
 
-              <EditField label="Job URL">
-                <input
-                  name="url"
-                  type="url"
-                  value={formValues.url}
-                  onChange={handleFieldChange}
-                  disabled={isSaving}
-                  className={inputClassName}
-                />
-              </EditField>
+                  <EditField label="Job URL">
+                    <input
+                      name="url"
+                      type="url"
+                      value={formValues.url}
+                      onChange={handleFieldChange}
+                      disabled={isSaving}
+                      className={inputClassName}
+                    />
+                  </EditField>
 
-              {saveError ? (
-                <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                  {saveError}
-                </p>
-              ) : null}
+                  {saveError ? (
+                    <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                      {saveError}
+                    </p>
+                  ) : null}
 
-              {deleteError ? (
-                <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                  {deleteError}
-                </p>
-              ) : null}
+                  {deleteError ? (
+                    <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                      {deleteError}
+                    </p>
+                  ) : null}
 
-              <div className="flex flex-col-reverse gap-3 border-t border-slate-200 pt-5 sm:flex-row sm:justify-end">
-                <button
-                  type="button"
-                  onClick={handleCancelEdit}
-                  disabled={isSaving}
-                  className="rounded-md border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 hover:text-slate-950 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-700 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSaving}
-                  className="rounded-md bg-teal-700 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-teal-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-700 disabled:cursor-not-allowed disabled:bg-teal-900/50"
-                >
-                  {isSaving ? "Saving..." : "Save Changes"}
-                </button>
-              </div>
+                  <div className="flex flex-col-reverse gap-3 border-t border-slate-200 pt-5 sm:flex-row sm:justify-end">
+                    <button
+                      type="button"
+                      onClick={handleCancelEdit}
+                      disabled={isSaving || isAnyNoteSaving}
+                      className="rounded-md border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 hover:text-slate-950 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-700 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={isSaving || isAnyNoteSaving}
+                      className="rounded-md bg-teal-700 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-teal-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-700 disabled:cursor-not-allowed disabled:bg-teal-900/50"
+                    >
+                      {isSaving ? "Saving..." : "Save Changes"}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-5 px-6 py-6">
+                  <dl className="grid gap-3 sm:grid-cols-2">
+                    <DetailItem label="Company name">{companyName}</DetailItem>
+
+                    <DetailItem label="Location">{location}</DetailItem>
+
+                    <DetailItem label="Job type">{jobType}</DetailItem>
+
+                    <DetailItem label="Status">{status}</DetailItem>
+
+                    <DetailItem label="Created date">{createdDate}</DetailItem>
+
+                    <DetailItem label="Updated date">{updatedDate}</DetailItem>
+                  </dl>
+
+                  <div className="rounded-lg border border-slate-200 bg-white p-4">
+                    <p className="text-xs font-semibold text-slate-500">
+                      Description
+                    </p>
+                    <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">
+                      {description}
+                    </p>
+                  </div>
+
+                  <div className="rounded-lg border border-slate-200 bg-white p-4">
+                    <p className="text-xs font-semibold text-slate-500">
+                      Job URL
+                    </p>
+                    {safeJobUrl ? (
+                      <a
+                        href={safeJobUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="mt-2 block break-all text-sm font-medium text-teal-700 transition hover:text-teal-800"
+                      >
+                        {jobUrl}
+                      </a>
+                    ) : (
+                      <p className="mt-2 break-all text-sm text-slate-700">
+                        {jobUrl}
+                      </p>
+                    )}
+                  </div>
+
+                  {deleteError ? (
+                    <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                      {deleteError}
+                    </p>
+                  ) : null}
+                </div>
+              )}
             </div>
-          ) : (
-            <div className="space-y-5 px-6 py-6">
-              <dl className="grid gap-3 sm:grid-cols-2">
-                <DetailItem label="Company name">{companyName}</DetailItem>
 
-                <DetailItem label="Location">{location}</DetailItem>
-
-                <DetailItem label="Job type">{jobType}</DetailItem>
-
-                <DetailItem label="Status">{status}</DetailItem>
-
-                <DetailItem label="Created date">{createdDate}</DetailItem>
-
-                <DetailItem label="Updated date">{updatedDate}</DetailItem>
-              </dl>
-
-              <div className="rounded-lg border border-slate-200 bg-white p-4">
-                <p className="text-xs font-semibold text-slate-500">
-                  Description
-                </p>
-                <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">
-                  {description}
-                </p>
-              </div>
-
-              <div className="rounded-lg border border-slate-200 bg-white p-4">
-                <p className="text-xs font-semibold text-slate-500">Job URL</p>
-                {safeJobUrl ? (
-                  <a
-                    href={safeJobUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="mt-2 block break-all text-sm font-medium text-teal-700 transition hover:text-teal-800"
-                  >
-                    {jobUrl}
-                  </a>
-                ) : (
-                  <p className="mt-2 break-all text-sm text-slate-700">
-                    {jobUrl}
-                  </p>
-                )}
-              </div>
-
-              {deleteError ? (
-                <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                  {deleteError}
-                </p>
-              ) : null}
-            </div>
-          )}
+            <ApplicationNotesPanel
+              notes={application.notes}
+              noteContent={noteContent}
+              isEditing={isEditing}
+              isSaving={isNoteSaving}
+              noteEditValues={noteEditValues}
+              noteErrors={noteEditErrors}
+              deletingNoteId={deletingNoteId}
+              savingNoteId={savingNoteId}
+              errorMessage={noteError}
+              deleteErrorMessage={noteDeleteError}
+              onContentChange={setNoteContent}
+              onNoteDelete={handleNoteDelete}
+              onNoteEditCancel={handleNoteEditCancel}
+              onNoteEditChange={handleNoteEditChange}
+              onNoteEditSave={handleNoteEditSave}
+              onSave={handleNoteSave}
+            />
+          </div>
         </form>
 
         {isDeleteConfirmOpen ? (
@@ -636,6 +1037,21 @@ export default function ApplicationsWorkspace({ statuses, initialApplications })
     setSelectedApplication(null);
   }
 
+  function handleApplicationsChange(nextApplications) {
+    setApplications(nextApplications);
+    setSelectedApplication((currentApplication) => {
+      if (!currentApplication) {
+        return currentApplication;
+      }
+
+      return (
+        nextApplications.find(
+          (application) => application.id === currentApplication.id,
+        ) ?? currentApplication
+      );
+    });
+  }
+
   async function handleApplicationUpdate(applicationId, formData) {
     const result = await updateJobApplication(applicationId, formData);
 
@@ -670,6 +1086,91 @@ export default function ApplicationsWorkspace({ statuses, initialApplications })
     return result;
   }
 
+  async function handleApplicationNoteCreate(applicationId, content) {
+    const result = await createApplicationNote(applicationId, content);
+
+    if (result.success) {
+      setApplications((currentApplications) =>
+        currentApplications.map((application) =>
+          application.id === applicationId
+            ? {
+                ...application,
+                notes: [result.note, ...(application.notes ?? [])],
+              }
+            : application,
+        ),
+      );
+      setSelectedApplication((currentApplication) =>
+        currentApplication?.id === applicationId
+          ? {
+              ...currentApplication,
+              notes: [result.note, ...(currentApplication.notes ?? [])],
+            }
+          : currentApplication,
+      );
+    }
+
+    return result;
+  }
+
+  async function handleApplicationNoteUpdate(noteId, content) {
+    const result = await updateApplicationNote(noteId, content);
+
+    if (result.success) {
+      const replaceNote = (application) => ({
+        ...application,
+        notes: (application.notes ?? []).map((note) =>
+          note.id === noteId ? result.note : note,
+        ),
+      });
+
+      setApplications((currentApplications) =>
+        currentApplications.map((application) =>
+          application.id === result.note.applicationId
+            ? replaceNote(application)
+            : application,
+        ),
+      );
+      setSelectedApplication((currentApplication) =>
+        currentApplication?.id === result.note.applicationId
+          ? replaceNote(currentApplication)
+          : currentApplication,
+      );
+    }
+
+    return result;
+  }
+
+  async function handleApplicationNoteDelete(applicationId, noteId) {
+    const previousApplications = applications;
+    const previousSelectedApplication = selectedApplication;
+
+    const removeNote = (application) => ({
+      ...application,
+      notes: (application.notes ?? []).filter((note) => note.id !== noteId),
+    });
+
+    setApplications((currentApplications) =>
+      currentApplications.map((application) =>
+        application.id === applicationId ? removeNote(application) : application,
+      ),
+    );
+    setSelectedApplication((currentApplication) =>
+      currentApplication?.id === applicationId
+        ? removeNote(currentApplication)
+        : currentApplication,
+    );
+
+    const result = await deleteApplicationNote(noteId);
+
+    if (!result.success) {
+      setApplications(previousApplications);
+      setSelectedApplication(previousSelectedApplication);
+    }
+
+    return result;
+  }
+
   return (
     <section className="mx-auto flex w-full max-w-[clamp(80rem,70vw,112rem)] flex-col gap-6 px-4 py-10 sm:px-6 lg:px-8">
       <div className="flex flex-col gap-4">
@@ -692,7 +1193,7 @@ export default function ApplicationsWorkspace({ statuses, initialApplications })
       <ApplicationsBoard
         statuses={statuses}
         applications={applications}
-        onApplicationsChange={setApplications}
+        onApplicationsChange={handleApplicationsChange}
         onApplicationSelect={setSelectedApplication}
       />
 
@@ -703,6 +1204,9 @@ export default function ApplicationsWorkspace({ statuses, initialApplications })
           statuses={statuses}
           onClose={closeApplicationDetails}
           onDelete={handleApplicationDelete}
+          onNoteCreate={handleApplicationNoteCreate}
+          onNoteDelete={handleApplicationNoteDelete}
+          onNoteUpdate={handleApplicationNoteUpdate}
           onUpdate={handleApplicationUpdate}
         />
       ) : null}

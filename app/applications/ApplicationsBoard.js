@@ -1,6 +1,5 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { celebrateAcceptedApplication } from "@/lib/confetti";
 import { updateJobApplicationStatus } from "./actions";
@@ -55,7 +54,7 @@ function LocationIcon() {
 function ApplicationCard({
   application,
   isDragging,
-  isUpdating,
+  isPending,
   onClick,
   onDragStart,
   onDragEnd,
@@ -69,18 +68,25 @@ function ApplicationCard({
 
   return (
     <article
-      draggable={!isUpdating}
+      draggable
       role="button"
-      tabIndex={isUpdating ? -1 : 0}
+      tabIndex={0}
       onClick={(event) => onClick(event, application)}
       onKeyDown={handleKeyDown}
       onDragStart={(event) => onDragStart(event, application.id)}
       onDragEnd={onDragEnd}
-      className={`cursor-grab rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition hover:border-slate-300 hover:shadow-md active:cursor-grabbing ${
+      className={`relative cursor-grab rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition hover:border-slate-300 hover:shadow-md active:cursor-grabbing ${
         isDragging ? "opacity-50 ring-2 ring-teal-500" : ""
-      } ${isUpdating ? "pointer-events-none opacity-70" : ""}`}
+      } ${isPending ? "border-teal-200 bg-teal-50/30" : ""}`}
     >
-      <h3 className="text-sm font-semibold leading-5 text-slate-950">
+      {isPending ? (
+        <span
+          aria-label="Saving status"
+          className="absolute right-3 top-3 h-2 w-2 rounded-full bg-teal-500"
+        />
+      ) : null}
+
+      <h3 className="pr-4 text-sm font-semibold leading-5 text-slate-950">
         {application.title}
       </h3>
 
@@ -117,20 +123,54 @@ export default function ApplicationsBoard({
   onApplicationsChange,
   onApplicationSelect,
 }) {
-  const router = useRouter();
   const scrollContainerRef = useRef(null);
   const autoScrollFrameRef = useRef(null);
+  const applicationsRef = useRef(applications);
+  const pendingStatusUpdatesRef = useRef({});
+  const isMountedRef = useRef(true);
   const latestDragClientXRef = useRef(0);
   const isDraggingRef = useRef(false);
   const lastDragEndedAtRef = useRef(null);
+  const [boardApplications, setBoardApplications] = useState(applications);
   const [draggingId, setDraggingId] = useState("");
   const [activeDropStatus, setActiveDropStatus] = useState("");
-  const [updatingId, setUpdatingId] = useState("");
+  const [pendingApplicationIds, setPendingApplicationIds] = useState({});
   const [errorMessage, setErrorMessage] = useState("");
-  const applicationsByStatus = groupApplicationsByStatus(applications, statuses);
+  const applicationsByStatus = groupApplicationsByStatus(
+    boardApplications,
+    statuses,
+  );
+
+  useEffect(() => {
+    const currentById = new Map(
+      applicationsRef.current.map((application) => [
+        application.id,
+        application,
+      ]),
+    );
+    const nextApplications = applications.map((application) => {
+      const currentApplication = currentById.get(application.id);
+      const pendingStatusUpdate =
+        pendingStatusUpdatesRef.current[application.id];
+
+      if (pendingStatusUpdate && currentApplication) {
+        return {
+          ...application,
+          status: currentApplication.status,
+        };
+      }
+
+      return application;
+    });
+
+    applicationsRef.current = nextApplications;
+    setBoardApplications(nextApplications);
+  }, [applications]);
 
   useEffect(() => {
     return () => {
+      isMountedRef.current = false;
+
       if (autoScrollFrameRef.current) {
         cancelAnimationFrame(autoScrollFrameRef.current);
       }
@@ -157,6 +197,165 @@ export default function ApplicationsBoard({
     }
 
     return 0;
+  }
+
+  function restoreBoardScroll(scrollLeft) {
+    requestAnimationFrame(() => {
+      if (scrollContainerRef.current) {
+        scrollContainerRef.current.scrollLeft = scrollLeft;
+      }
+    });
+  }
+
+  function applyApplications(nextApplications) {
+    applicationsRef.current = nextApplications;
+
+    if (!isMountedRef.current) {
+      return;
+    }
+
+    setBoardApplications(nextApplications);
+    onApplicationsChange(nextApplications);
+  }
+
+  function setApplicationPending(applicationId, isPending) {
+    if (!isMountedRef.current) {
+      return;
+    }
+
+    setPendingApplicationIds((currentPendingIds) => {
+      if (isPending) {
+        return currentPendingIds[applicationId]
+          ? currentPendingIds
+          : { ...currentPendingIds, [applicationId]: true };
+      }
+
+      if (!currentPendingIds[applicationId]) {
+        return currentPendingIds;
+      }
+
+      const nextPendingIds = { ...currentPendingIds };
+      delete nextPendingIds[applicationId];
+
+      return nextPendingIds;
+    });
+  }
+
+  function updateApplicationInBoard(applicationId, getNextApplication) {
+    const nextApplications = applicationsRef.current.map((application) =>
+      application.id === applicationId
+        ? getNextApplication(application)
+        : application,
+    );
+
+    applyApplications(nextApplications);
+  }
+
+  async function syncPendingStatus(applicationId) {
+    const pendingStatusUpdate = pendingStatusUpdatesRef.current[applicationId];
+
+    if (!pendingStatusUpdate || pendingStatusUpdate.inFlight) {
+      return;
+    }
+
+    if (
+      pendingStatusUpdate.confirmedApplication.status ===
+      pendingStatusUpdate.desiredStatus
+    ) {
+      delete pendingStatusUpdatesRef.current[applicationId];
+      setApplicationPending(applicationId, false);
+      return;
+    }
+
+    pendingStatusUpdate.inFlight = true;
+
+    const requestedStatus = pendingStatusUpdate.desiredStatus;
+    const currentScrollLeft = scrollContainerRef.current?.scrollLeft ?? 0;
+
+    try {
+      const result = await updateJobApplicationStatus(
+        applicationId,
+        requestedStatus,
+      );
+      const latestStatusUpdate =
+        pendingStatusUpdatesRef.current[applicationId];
+
+      if (!latestStatusUpdate) {
+        return;
+      }
+
+      if (result.success) {
+        const savedApplication =
+          result.application ?? {
+            ...latestStatusUpdate.confirmedApplication,
+            status: requestedStatus,
+          };
+
+        latestStatusUpdate.confirmedApplication = savedApplication;
+
+        updateApplicationInBoard(applicationId, (currentApplication) => {
+          if (currentApplication.status === requestedStatus) {
+            return savedApplication;
+          }
+
+          return {
+            ...savedApplication,
+            status: currentApplication.status,
+          };
+        });
+      } else if (latestStatusUpdate.desiredStatus === requestedStatus) {
+        updateApplicationInBoard(
+          applicationId,
+          () => latestStatusUpdate.confirmedApplication,
+        );
+        setErrorMessage(result.message || "Application could not be updated.");
+        delete pendingStatusUpdatesRef.current[applicationId];
+        setApplicationPending(applicationId, false);
+        restoreBoardScroll(currentScrollLeft);
+        return;
+      }
+    } catch {
+      const latestStatusUpdate =
+        pendingStatusUpdatesRef.current[applicationId];
+
+      if (
+        latestStatusUpdate &&
+        latestStatusUpdate.desiredStatus === requestedStatus
+      ) {
+        updateApplicationInBoard(
+          applicationId,
+          () => latestStatusUpdate.confirmedApplication,
+        );
+        setErrorMessage("Application could not be updated.");
+        delete pendingStatusUpdatesRef.current[applicationId];
+        setApplicationPending(applicationId, false);
+        restoreBoardScroll(currentScrollLeft);
+        return;
+      }
+    } finally {
+      const latestStatusUpdate =
+        pendingStatusUpdatesRef.current[applicationId];
+
+      if (!latestStatusUpdate) {
+        restoreBoardScroll(currentScrollLeft);
+        return;
+      }
+
+      latestStatusUpdate.inFlight = false;
+
+      if (
+        latestStatusUpdate.confirmedApplication.status ===
+        latestStatusUpdate.desiredStatus
+      ) {
+        delete pendingStatusUpdatesRef.current[applicationId];
+        setApplicationPending(applicationId, false);
+        restoreBoardScroll(currentScrollLeft);
+        return;
+      }
+
+      restoreBoardScroll(currentScrollLeft);
+      void syncPendingStatus(applicationId);
+    }
   }
 
   function stopAutoScroll() {
@@ -222,7 +421,7 @@ export default function ApplicationsBoard({
       lastDragEndedAtRef.current !== null &&
       event.timeStamp - lastDragEndedAtRef.current < 250;
 
-    if (isDraggingRef.current || recentlyDragged || updatingId) {
+    if (isDraggingRef.current || recentlyDragged) {
       return;
     }
 
@@ -234,61 +433,45 @@ export default function ApplicationsBoard({
 
     const applicationId =
       event.dataTransfer.getData("text/plain") || draggingId;
-    const application = applications.find((item) => item.id === applicationId);
+    const application = applicationsRef.current.find(
+      (item) => item.id === applicationId,
+    );
     const currentScrollLeft = scrollContainerRef.current?.scrollLeft ?? 0;
 
     stopAutoScroll();
     setDraggingId("");
     setActiveDropStatus("");
 
-    if (!application || application.status === nextStatus || updatingId) {
+    if (!application || application.status === nextStatus) {
       return;
     }
 
     const previousStatus = application.status;
     const shouldCelebrateAccepted =
       previousStatus !== ACCEPTED_STATUS && nextStatus === ACCEPTED_STATUS;
-    const previousApplications = applications;
-    const nextApplications = applications.map((item) =>
+    const nextApplications = applicationsRef.current.map((item) =>
       item.id === applicationId ? { ...item, status: nextStatus } : item,
     );
+    const pendingStatusUpdate = pendingStatusUpdatesRef.current[applicationId];
 
-    onApplicationsChange(nextApplications);
-    setUpdatingId(applicationId);
+    pendingStatusUpdatesRef.current[applicationId] = {
+      confirmedApplication:
+        pendingStatusUpdate?.confirmedApplication ?? application,
+      desiredStatus: nextStatus,
+      inFlight: pendingStatusUpdate?.inFlight ?? false,
+    };
+
+    applyApplications(nextApplications);
+    setApplicationPending(applicationId, true);
     setErrorMessage("");
+    restoreBoardScroll(currentScrollLeft);
 
     if (shouldCelebrateAccepted) {
-      celebrateAcceptedApplication();
+      void celebrateAcceptedApplication();
     }
 
-    try {
-      const result = await updateJobApplicationStatus(applicationId, nextStatus);
-
-      if (!result.success) {
-        onApplicationsChange(previousApplications);
-        setErrorMessage(result.message);
-        return;
-      }
-
-      if (result.application) {
-        onApplicationsChange((currentApplications) =>
-          currentApplications.map((item) =>
-            item.id === applicationId ? result.application : item,
-          ),
-        );
-      }
-
-      router.refresh();
-      requestAnimationFrame(() => {
-        if (scrollContainerRef.current) {
-          scrollContainerRef.current.scrollLeft = currentScrollLeft;
-        }
-      });
-    } catch {
-      onApplicationsChange(previousApplications);
-      setErrorMessage("Application could not be updated.");
-    } finally {
-      setUpdatingId("");
+    if (!pendingStatusUpdatesRef.current[applicationId].inFlight) {
+      void syncPendingStatus(applicationId);
     }
   }
 
@@ -338,7 +521,7 @@ export default function ApplicationsBoard({
                         key={application.id}
                         application={application}
                         isDragging={draggingId === application.id}
-                        isUpdating={updatingId === application.id}
+                        isPending={Boolean(pendingApplicationIds[application.id])}
                         onClick={handleCardClick}
                         onDragStart={handleDragStart}
                         onDragEnd={handleDragEnd}

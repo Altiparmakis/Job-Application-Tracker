@@ -15,15 +15,65 @@ const statuses = new Set([
   "ACCEPTED",
 ]);
 
-const applicationSelect = {
+const noteSelect = {
   id: true,
-  title: true,
-  companyName: true,
-  description: true,
-  url: true,
-  location: true,
-  jobType: true,
-  status: true,
+  applicationId: true,
+  content: true,
+  createdAt: true,
+  updatedAt: true,
+};
+
+function getApplicationSelect(userId) {
+  return {
+    id: true,
+    title: true,
+    companyName: true,
+    description: true,
+    url: true,
+    location: true,
+    jobType: true,
+    status: true,
+    createdAt: true,
+    updatedAt: true,
+    notes: {
+      where: {
+        clerkId: userId,
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+      select: noteSelect,
+    },
+  };
+}
+
+function serializeNote(note) {
+  return {
+    ...note,
+    createdAt: note.createdAt.toISOString(),
+    updatedAt: note.updatedAt.toISOString(),
+  };
+}
+
+function serializeApplication(application) {
+  const notes = Array.isArray(application.notes)
+    ? application.notes.map(serializeNote)
+    : application.notes;
+
+  return {
+    ...application,
+    notes,
+    createdAt: application.createdAt.toISOString(),
+    updatedAt: application.updatedAt.toISOString(),
+  };
+}
+
+const noteContentMaxLength = 4000;
+
+const applicationNoteSelect = {
+  id: true,
+  applicationId: true,
+  content: true,
   createdAt: true,
   updatedAt: true,
 };
@@ -32,14 +82,6 @@ function getString(formData, name) {
   const value = formData.get(name);
 
   return typeof value === "string" ? value.trim() : "";
-}
-
-function serializeApplication(application) {
-  return {
-    ...application,
-    createdAt: application.createdAt.toISOString(),
-    updatedAt: application.updatedAt.toISOString(),
-  };
 }
 
 export async function createJobApplication(formData) {
@@ -85,7 +127,7 @@ export async function createJobApplication(formData) {
       jobType,
       status,
     },
-    select: applicationSelect,
+    select: getApplicationSelect(userId),
   });
 
   revalidatePath("/applications");
@@ -136,7 +178,7 @@ export async function updateJobApplicationStatus(applicationId, status) {
       id: applicationId,
       clerkId: userId,
     },
-    select: applicationSelect,
+    select: getApplicationSelect(userId),
   });
 
   if (!application) {
@@ -222,7 +264,7 @@ export async function updateJobApplication(applicationId, formData) {
       id: applicationId,
       clerkId: userId,
     },
-    select: applicationSelect,
+    select: getApplicationSelect(userId),
   });
 
   if (!application) {
@@ -238,6 +280,186 @@ export async function updateJobApplication(applicationId, formData) {
     success: true,
     message: "Application updated.",
     application: serializeApplication(application),
+  };
+}
+
+export async function createApplicationNote(applicationId, content) {
+  const { userId } = await auth();
+
+  if (!userId) {
+    return {
+      success: false,
+      message: "You must be signed in to add a note.",
+    };
+  }
+
+  const noteContent = typeof content === "string" ? content.trim() : "";
+
+  if (!applicationId || !noteContent) {
+    return {
+      success: false,
+      message: "Please write a note before saving.",
+    };
+  }
+
+  if (noteContent.length > noteContentMaxLength) {
+    return {
+      success: false,
+      message: `Notes must be ${noteContentMaxLength} characters or fewer.`,
+    };
+  }
+
+  const application = await prisma.jobApplication.findFirst({
+    where: {
+      id: applicationId,
+      clerkId: userId,
+    },
+    select: {
+      id: true,
+    },
+  });
+
+  if (!application) {
+    return {
+      success: false,
+      message: "Application could not be found.",
+    };
+  }
+
+  const note = await prisma.applicationNote.create({
+    data: {
+      applicationId,
+      clerkId: userId,
+      content: noteContent,
+    },
+    select: applicationNoteSelect,
+  });
+
+  revalidatePath("/applications");
+
+  return {
+    success: true,
+    message: "Note added.",
+    note: serializeNote(note),
+  };
+}
+
+export async function updateApplicationNote(noteId, content) {
+  const { userId } = await auth();
+
+  if (!userId) {
+    return {
+      success: false,
+      message: "You must be signed in to update a note.",
+    };
+  }
+
+  const noteContent = typeof content === "string" ? content.trim() : "";
+
+  if (!noteId || !noteContent) {
+    return {
+      success: false,
+      message: "Notes cannot be empty.",
+    };
+  }
+
+  if (noteContent.length > noteContentMaxLength) {
+    return {
+      success: false,
+      message: `Notes must be ${noteContentMaxLength} characters or fewer.`,
+    };
+  }
+
+  const existingNote = await prisma.applicationNote.findFirst({
+    where: {
+      id: noteId,
+      clerkId: userId,
+      application: {
+        clerkId: userId,
+      },
+    },
+    select: {
+      id: true,
+    },
+  });
+
+  if (!existingNote) {
+    return {
+      success: false,
+      message: "Note could not be found.",
+    };
+  }
+
+  const note = await prisma.applicationNote.update({
+    where: {
+      id: noteId,
+    },
+    data: {
+      content: noteContent,
+    },
+    select: applicationNoteSelect,
+  });
+
+  revalidatePath("/applications");
+
+  return {
+    success: true,
+    message: "Note updated.",
+    note: serializeNote(note),
+  };
+}
+
+export async function deleteApplicationNote(noteId) {
+  const { userId } = await auth();
+
+  if (!userId) {
+    return {
+      success: false,
+      message: "You must be signed in to delete a note.",
+    };
+  }
+
+  if (!noteId) {
+    return {
+      success: false,
+      message: "Note could not be deleted.",
+    };
+  }
+
+  const existingNote = await prisma.applicationNote.findFirst({
+    where: {
+      id: noteId,
+      clerkId: userId,
+      application: {
+        clerkId: userId,
+      },
+    },
+    select: {
+      id: true,
+      applicationId: true,
+    },
+  });
+
+  if (!existingNote) {
+    return {
+      success: false,
+      message: "Note could not be found.",
+    };
+  }
+
+  await prisma.applicationNote.delete({
+    where: {
+      id: noteId,
+    },
+  });
+
+  revalidatePath("/applications");
+
+  return {
+    success: true,
+    message: "Note deleted.",
+    noteId,
+    applicationId: existingNote.applicationId,
   };
 }
 
