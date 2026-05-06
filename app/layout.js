@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata = {
-  title: "JobTrack",
+  title: "JobFlow.",
   description: "Track every job application in one organized place.",
   icons: {
     icon: [
