@@ -23,7 +23,7 @@ const COMPANY_SUFFIXES = new Set([
   "srl",
 ]);
 
-// TODO: Set NEXT_PUBLIC_LOGO_DEV_TOKEN to enable browser-side logo.dev requests.
+
 const logoDevToken = process.env.NEXT_PUBLIC_LOGO_DEV_TOKEN?.trim();
 
 function GenericCompanyLogo() {
@@ -140,7 +140,7 @@ export default function CompanyLogo({ companyName }) {
   const shouldShowLogo = logoUrl && failedLogoUrl !== logoUrl;
 
   return (
-    <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-white/85 text-teal-700 shadow-sm ring-1 ring-slate-950/4">
+    <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden  rounded-lg bg-white/85 text-teal-700 shadow-sm ring-1 ring-slate-950/4">
       {shouldShowLogo ? (
         <img
           src={logoUrl}
